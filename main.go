@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"time"
 
+	"ch0wdreN/oauth-example/extension"
+
 	"github.com/ory/fosite"
 	"github.com/ory/fosite/compose"
 	"github.com/ory/fosite/handler/oauth2"
@@ -43,6 +45,24 @@ func main() {
 		config,
 	)
 
+	store.Clients["service-a"] = &fosite.DefaultClient{
+		ID:            "service-a",
+		Secret:        []byte("$2a$10$IxMdI6d.LIRZPpSfEwNoeu4rY3FhDREsxFJXikcgdRRAStxUlsuEO"),
+		RedirectURIs:  []string{"http://localhost:3000/callback"},
+		GrantTypes:    fosite.Arguments{"authorization_code", "refresh_token", "urn:your-company:params:oauth:grant-type:security-token-obtain"},
+		ResponseTypes: fosite.Arguments{"code", "token"},
+		Scopes:        []string{"fosite", "read", "write", "offline"},
+	}
+
+	store.Clients["service-b"] = &fosite.DefaultClient{
+		ID:            "service-b",
+		Secret:        []byte("$2a$10$IxMdI6d.LIRZPpSfEwNoeu4rY3FhDREsxFJXikcgdRRAStxUlsuEO"),
+		RedirectURIs:  []string{"http://localhost:3001/callback"},
+		GrantTypes:    fosite.Arguments{"authorization_code", "refresh_token", "urn:ietf:params:oauth:grant-type:token-exchange"},
+		ResponseTypes: fosite.Arguments{"code", "token"},
+		Scopes:        []string{"fosite", "read", "write", "offline"},
+	}
+
 	provider := compose.Compose(
 		config,
 		store,
@@ -51,6 +71,8 @@ func main() {
 		compose.OAuth2RefreshTokenGrantFactory,
 		compose.OAuth2TokenRevocationFactory,
 		compose.OAuth2PKCEFactory,
+		extension.SecurityTokenObtainHandlerFactory,
+		extension.TokenExchangeHandlerFactory,
 	)
 
 	http.HandleFunc("/oauth2/authorization", func(w http.ResponseWriter, r *http.Request) {
@@ -70,7 +92,7 @@ func main() {
 		mySessionData := &oauth2.JWTSession{
 			JWTClaims: &jwt.JWTClaims{
 				Issuer:    "https://my-oauth-server.com",
-				Subject:   "user-id-123",
+				Subject:   "peter",
 				Audience:  []string{ar.GetClient().GetID()},
 				ExpiresAt: time.Now().Add(time.Hour),
 				IssuedAt:  time.Now(),
