@@ -1,0 +1,22 @@
+services:
+  valkey:
+    image: valkey/valkey:latest
+    container_name: valkey
+    ports:
+      - "6379:6379"
+    volumes:
+      - valkey_data:/data
+      - ./users.acl:/etc/valkey/users.acl:ro
+    restart: unless-stopped
+    command: >
+      valkey-server
+      --save 60 1
+      --loglevel warning
+      --aclfile /etc/valkey/users.acl
+      --requirepass ${VALKEY_PASSWORD:-mypassword}
+    environment:
+      - VALKEY_PASSWORD=${VALKEY_PASSWORD:-mypassword}
+
+volumes:
+  valkey_data:
+    driver: local
