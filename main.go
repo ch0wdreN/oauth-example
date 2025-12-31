@@ -10,11 +10,12 @@ import (
 	"time"
 
 	"ch0wdreN/oauth-example/extension"
+	memoryclient "ch0wdreN/oauth-example/store/memory_client"
+	"ch0wdreN/oauth-example/store/valkey"
 
 	"github.com/ory/fosite"
 	"github.com/ory/fosite/compose"
 	"github.com/ory/fosite/handler/oauth2"
-	"github.com/ory/fosite/storage"
 	"github.com/ory/fosite/token/jwt"
 )
 
@@ -24,7 +25,6 @@ var (
 		AccessTokenLifespan: time.Minute * 30,
 		GlobalSecret:        secret,
 	}
-	store      = storage.NewExampleStore()
 	privateKey = mustGenerateKey()
 )
 
@@ -37,6 +37,8 @@ func mustGenerateKey() *rsa.PrivateKey {
 }
 
 func main() {
+	ctx := context.Background()
+
 	jwtStrategy := compose.NewOAuth2JWTStrategy(
 		func(_ context.Context) (interface{}, error) {
 			return privateKey, nil
@@ -45,22 +47,37 @@ func main() {
 		config,
 	)
 
-	store.Clients["service-a"] = &fosite.DefaultClient{
-		ID:            "service-a",
-		Secret:        []byte("$2a$10$IxMdI6d.LIRZPpSfEwNoeu4rY3FhDREsxFJXikcgdRRAStxUlsuEO"),
-		RedirectURIs:  []string{"http://localhost:3000/callback"},
-		GrantTypes:    fosite.Arguments{"authorization_code", "refresh_token", "urn:your-company:params:oauth:grant-type:security-token-obtain"},
-		ResponseTypes: fosite.Arguments{"code", "token"},
-		Scopes:        []string{"fosite", "read", "write", "offline"},
+	memoryStore := memoryclient.NewMemoryClientStore()
+	valkeyConfig, err := valkey.NewValkeyConfig()
+	if err != nil {
+		log.Fatal(err)
+		return
+	}
+	valkeyClient, err := valkey.NewValkeyClient(ctx, valkeyConfig)
+	if err != nil {
+		log.Fatal(err)
+		return
 	}
 
-	store.Clients["service-b"] = &fosite.DefaultClient{
-		ID:            "service-b",
-		Secret:        []byte("$2a$10$IxMdI6d.LIRZPpSfEwNoeu4rY3FhDREsxFJXikcgdRRAStxUlsuEO"),
-		RedirectURIs:  []string{"http://localhost:3001/callback"},
-		GrantTypes:    fosite.Arguments{"authorization_code", "refresh_token", "urn:ietf:params:oauth:grant-type:token-exchange"},
-		ResponseTypes: fosite.Arguments{"code", "token"},
-		Scopes:        []string{"fosite", "read", "write", "offline"},
+	valkeyAuthorizeCodeStorage := valkey.NewValkeyAuthorizeCodeStorage(valkeyClient, memoryStore)
+	valkeyAccessTokenStorage := valkey.NewValkeyAccessTokenStorage(valkeyClient, memoryStore, config.GetAccessTokenLifespan(ctx))
+	valkeyRefreshTokenStorage := valkey.NewValkeyRefreshTokenStorage(valkeyClient, config.GetRefreshTokenLifespan(ctx))
+	valkeyTokenRevocationStorage := valkey.NewValkeyTokenRevocationStorage(valkeyClient, valkeyAccessTokenStorage, valkeyRefreshTokenStorage)
+
+	type Store struct {
+		*memoryclient.MemoryClientStore
+		*valkey.ValkeyAccessTokenStorage
+		*valkey.ValkeyAuthorizeCodeStorage
+		*valkey.ValkeyRefreshTokenStorage
+		*valkey.ValkeyTokenRevocationStorage
+	}
+
+	store := &Store{
+		MemoryClientStore:            memoryStore,
+		ValkeyAccessTokenStorage:     valkeyAccessTokenStorage,
+		ValkeyAuthorizeCodeStorage:   valkeyAuthorizeCodeStorage,
+		ValkeyRefreshTokenStorage:    valkeyRefreshTokenStorage,
+		ValkeyTokenRevocationStorage: valkeyTokenRevocationStorage,
 	}
 
 	provider := compose.Compose(
@@ -70,7 +87,7 @@ func main() {
 		compose.OAuth2AuthorizeExplicitFactory,
 		compose.OAuth2RefreshTokenGrantFactory,
 		compose.OAuth2TokenRevocationFactory,
-		compose.OAuth2PKCEFactory,
+
 		extension.SecurityTokenObtainHandlerFactory,
 		extension.TokenExchangeHandlerFactory,
 	)
