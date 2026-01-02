@@ -40,7 +40,7 @@ func main() {
 	ctx := context.Background()
 
 	jwtStrategy := compose.NewOAuth2JWTStrategy(
-		func(_ context.Context) (interface{}, error) {
+		func(_ context.Context) (any, error) {
 			return privateKey, nil
 		},
 		compose.NewOAuth2HMACStrategy(config),
