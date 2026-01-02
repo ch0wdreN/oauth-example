@@ -118,6 +118,9 @@ func (v *ValkeyAccessTokenStorage) GetAccessTokenSession(ctx context.Context, si
 	clientID := string(clientResult)
 
 	client, err := v.GetClient(ctx, clientID)
+	if err != nil {
+		return nil, err
+	}
 
 	req.Client = client
 
