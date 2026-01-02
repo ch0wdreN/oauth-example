@@ -115,7 +115,7 @@ func main() {
 				IssuedAt:  time.Now(),
 			},
 			JWTHeader: &jwt.Headers{
-				Extra: make(map[string]interface{}),
+				Extra: make(map[string]any),
 			},
 		}
 
