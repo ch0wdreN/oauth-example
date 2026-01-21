@@ -4,9 +4,12 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"time"
 
 	"ch0wdreN/oauth-example/extension"
@@ -91,9 +94,79 @@ func main() {
 		extension.SecurityTokenObtainHandlerFactory,
 		extension.TokenExchangeHandlerFactory,
 	)
+	type VerifiableAddress struct {
+		ID         string     `json:"id"`
+		Value      string     `json:"value"`
+		Verified   bool       `json:"verified"`
+		Via        string     `json:"via"`
+		Status     string     `json:"status"`
+		VerifiedAt *time.Time `json:"verified_at,omitempty"`
+	}
+	type KratosIdentity struct {
+		ID                  string                 `json:"id"`
+		SchemaID            string                 `json:"schema_id"`
+		SchemaURL           string                 `json:"schema_url"`
+		State               string                 `json:"state"`
+		Traits              map[string]interface{} `json:"traits"`
+		VerifiableAddresses []VerifiableAddress    `json:"verifiable_addresses,omitempty"`
+	}
+
+	type KratosSession struct {
+		ID              string         `json:"id"`
+		Active          bool           `json:"active"`
+		ExpiresAt       time.Time      `json:"expires_at"`
+		AuthenticatedAt time.Time      `json:"authenticated_at"`
+		IssuedAt        time.Time      `json:"issued_at"`
+		Identity        KratosIdentity `json:"identity"`
+	}
 
 	http.HandleFunc("/oauth2/authorization", func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
+
+		cookie, err := r.Cookie("ory_kratos_session")
+		if errors.Is(err, http.ErrNoCookie) {
+			// not logined
+			current := fmt.Sprintf("http://%s%s", r.Host, r.RequestURI)
+			redirect := fmt.Sprintf("http://localhost:4433/self-service/login/browser?return_to=%s", url.QueryEscape(current))
+			http.Redirect(w, r, redirect, http.StatusFound)
+			return
+		}
+		if err != nil {
+			http.Redirect(w, r, "http://localhost:8080/error.html", http.StatusFound)
+			return
+		}
+
+		// whoami
+		req, err := http.NewRequestWithContext(
+			ctx,
+			http.MethodGet,
+			"http://localhost:4433/sessions/whoami",
+			nil,
+		)
+		if err != nil {
+			http.Redirect(w, r, "http://localhost:8080/error.html", http.StatusFound)
+			return
+		}
+		req.AddCookie(cookie)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			http.Redirect(w, r, "http://localhost:8080/error.html", http.StatusFound)
+			return
+		}
+		defer resp.Body.Close()
+
+		var kratosSession KratosSession
+		if err := json.NewDecoder(resp.Body).Decode(&kratosSession); err != nil {
+			http.Redirect(w, r, "http://localhost:8080/error.html", http.StatusFound)
+			return
+		}
+
+		extraAttributes := make(map[string]any)
+
+		if email, exist := kratosSession.Identity.Traits["email"]; exist {
+			extraAttributes["email"] = email
+			fmt.Printf("email found: %s\n", email)
+		}
 		ar, err := provider.NewAuthorizeRequest(ctx, r)
 		if err != nil {
 			log.Printf("Error occurred in NewAuthorizeRequest: %+v", err)
@@ -106,20 +179,20 @@ func main() {
 			ar.GrantScope(scope)
 		}
 
-		mySessionData := &oauth2.JWTSession{
+		session := &oauth2.JWTSession{
 			JWTClaims: &jwt.JWTClaims{
 				Issuer:    "https://my-oauth-server.com",
-				Subject:   "peter",
+				Subject:   kratosSession.Identity.ID,
 				Audience:  []string{ar.GetClient().GetID()},
 				ExpiresAt: time.Now().Add(time.Hour),
 				IssuedAt:  time.Now(),
+				Extra:     extraAttributes,
 			},
-			JWTHeader: &jwt.Headers{
-				Extra: make(map[string]any),
-			},
+			JWTHeader: &jwt.Headers{},
+			Subject:   kratosSession.Identity.ID,
 		}
 
-		response, err := provider.NewAuthorizeResponse(ctx, ar, mySessionData)
+		response, err := provider.NewAuthorizeResponse(ctx, ar, session)
 		if err != nil {
 			log.Printf("Error occurred in NewAuthorizeResponse: %+v", err)
 			provider.WriteAuthorizeError(ctx, w, ar, err)
@@ -132,9 +205,9 @@ func main() {
 	http.HandleFunc("/oauth2/token", func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
 
-		mySessionData := &oauth2.JWTSession{}
+		session := new(oauth2.JWTSession)
 
-		accessRequest, err := provider.NewAccessRequest(ctx, r, mySessionData)
+		accessRequest, err := provider.NewAccessRequest(ctx, r, session)
 		if err != nil {
 			log.Printf("Error occurred in NewAccessRequest: %+v", err)
 			provider.WriteAccessError(ctx, w, accessRequest, err)
@@ -162,6 +235,7 @@ func main() {
 
 		provider.WriteRevocationResponse(ctx, w, nil)
 	})
+	http.Handle("/", http.FileServer(http.Dir("./static")))
 
 	fmt.Println("OAuth2 server is running on :8080")
 	fmt.Println("  - Authorization endpoint: http://localhost:8080/oauth2/authorization")

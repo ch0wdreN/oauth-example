@@ -17,6 +17,64 @@ services:
     environment:
       - VALKEY_PASSWORD=${VALKEY_PASSWORD:-mypassword}
 
+  kratos-db:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_DB: kratos
+      POSTGRES_USER: kratos
+      POSTGRES_PASSWORD: kratos_secret
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kratos"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    ports:
+      - "5432:5432"
+    volumes:
+      - /kratos-db-data
+
+  kratos-migrate:
+    image: oryd/kratos:v25.4.0
+    environment:
+      DSN: postgres://kratos:kratos_secret@kratos-db:5432/kratos?sslmode=disable
+    command: migrate sql -e --yes
+    depends_on:
+      - kratos-db
+
+  kratos:
+    image: oryd/kratos:v25.4.0
+    ports:
+      - "4433:4433"  # public API
+      - "4434:4434"  # admin API
+    environment:
+      DSN: postgres://kratos:kratos_secret@kratos-db:5432/kratos?sslmode=disable
+      LOG_LEVEL: debug
+    volumes:
+      - ./kratos/config:/etc/config/kratos
+    command: serve -c /etc/config/kratos/kratos.yaml --dev --watch-courier
+    depends_on:
+      - kratos-migrate
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "--quiet", "http://localhost:4433/health/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  kratos-ui:
+    image: oryd/kratos-selfservice-ui-node:v25.4.0
+    environment:
+      KRATOS_PUBLIC_URL: http://kratos:4433
+      KRATOS_BROWSER_URL: http://localhost:4433
+      PORT: 3000
+      COOKIE_SECRET: please-change-this-secret-min-32-chars!!
+      CSRF_COOKIE_NAME: __HOST-kratos-ui-csrf
+      CSRF_COOKIE_SECRET: another-secret-min-32-chars-long!!
+    ports:
+      - "3000:3000"
+    depends_on:
+      - kratos
+
 volumes:
+  kratos-db-data:
   valkey_data:
     driver: local

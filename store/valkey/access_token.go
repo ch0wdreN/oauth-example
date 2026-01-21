@@ -51,6 +51,25 @@ func (v *ValkeyAccessTokenStorage) CreateAccessTokenSession(ctx context.Context,
 		return fmt.Errorf("failed to set access token: %w", err)
 	}
 
+	var session oauth2.JWTSession
+	if v, ok := request.GetSession().(*oauth2.JWTSession); ok {
+		session = *v
+	} else {
+		return fmt.Errorf("failed to convert session")
+	}
+
+	data, err = json.Marshal(session)
+	if err != nil {
+		return fmt.Errorf("failed to marshal session: %w", err)
+	}
+
+	key = accessTokenSessionKey(signature)
+	cmd = v.client.B().Set().Key(key).Value(string(data)).Ex(v.accessTokenLifespan).Build()
+
+	if err := v.client.Do(ctx, cmd).Error(); err != nil {
+		return fmt.Errorf("failed to set session: %w", err)
+	}
+
 	clientKey := accessTokenClientKey(signature)
 	cmd = v.client.B().Set().Key(clientKey).Value(request.GetClient().GetID()).Ex(v.accessTokenLifespan).Build()
 
@@ -101,10 +120,24 @@ func (v *ValkeyAccessTokenStorage) GetAccessTokenSession(ctx context.Context, si
 		return nil, fmt.Errorf("failed to unmarshal request: %w", err)
 	}
 
-	// Restore session if provided
-	if session != nil {
-		req.Session = session
+	// Restore session
+	key = accessTokenSessionKey(signature)
+	cmd = v.client.B().Get().Key(key).Build()
+
+	result, err = v.client.Do(ctx, cmd).AsReader()
+	if valkey.IsValkeyNil(err) {
+		return nil, fosite.ErrNotFound
 	}
+	if err != nil {
+		// Check if key not found
+		return nil, fmt.Errorf("failed to get access token: %w", err)
+	}
+
+	if err := json.NewDecoder(result).Decode(session); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal request: %w", err)
+	}
+
+	req.SetSession(session)
 
 	clientKey := accessTokenClientKey(signature)
 	cmd = v.client.B().Get().Key(clientKey).Build()

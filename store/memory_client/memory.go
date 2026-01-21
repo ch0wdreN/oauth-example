@@ -21,7 +21,7 @@ func NewMemoryClientStore() *MemoryClientStore {
 			"service-a": &fosite.DefaultClient{
 				ID:            "service-a",
 				Secret:        []byte("$2a$10$IxMdI6d.LIRZPpSfEwNoeu4rY3FhDREsxFJXikcgdRRAStxUlsuEO"),
-				RedirectURIs:  []string{"http://localhost:3000/callback"},
+				RedirectURIs:  []string{"http://localhost:3000/callback", "http://localhost:8080/"},
 				GrantTypes:    fosite.Arguments{"authorization_code", "refresh_token", "urn:your-company:params:oauth:grant-type:security-token-obtain"},
 				ResponseTypes: fosite.Arguments{"code", "token"},
 				Scopes:        []string{"fosite", "read", "write", "offline"},

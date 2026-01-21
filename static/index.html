@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OAuth 2.0 Test Client</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+        }
+        .section {
+            margin: 30px 0;
+            padding: 20px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+        button {
+            padding: 10px 20px;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        pre {
+            background-color: #f5f5f5;
+            padding: 15px;
+            border-radius: 5px;
+            overflow-x: auto;
+        }
+        .token {
+            word-break: break-all;
+            background-color: #e8f5e9;
+            padding: 10px;
+            border-radius: 5px;
+            margin-top: 10px;
+        }
+        .info {
+            background-color: #e3f2fd;
+            padding: 10px;
+            border-radius: 5px;
+            margin: 10px 0;
+        }
+        .toggle {
+            margin: 15px 0;
+        }
+    </style>
+</head>
+<body>
+    <h1>OAuth 2.0 Test Client</h1>
+
+    <div class="section">
+        <h2>設定（ハードコード）</h2>
+        <div class="info">
+            <strong>Client ID:</strong> service-a<br>
+            <strong>Client Secret:</strong> foobar<br>
+            <strong>Redirect URI:</strong> http://localhost:8080/<br>
+            <strong>Scope:</strong> fosite <br>
+            <strong>State:</strong> some-random-state
+        </div>
+    </div>
+
+    <div class="section">
+        <h2>Step 1: 認可リクエスト</h2>
+        <p>認可エンドポイントにアクセスしてログインします</p>
+        <button onclick="startAuthFlow()">ログインして認可</button>
+    </div>
+
+    <div class="section">
+        <h2>Step 2: 認可コード</h2>
+        <p id="authCodeSection">認可リクエスト後、ここにコードが表示されます</p>
+        <div id="authCodeDisplay"></div>
+    </div>
+
+    <div class="section">
+        <h2>Step 3: トークン取得</h2>
+        <button id="exchangeBtn" onclick="exchangeToken()" disabled>トークンと交換</button>
+        <div id="tokenDisplay"></div>
+    </div>
+
+    <div class="section">
+        <h2>Step 4: ID Token</h2>
+        <div id="idTokenDisplay"></div>
+    </div>
+
+    <script>
+        // ハードコードされた設定
+        const CONFIG = {
+            clientId: 'service-a',
+            clientSecret: 'foobar',
+            redirectUri: 'http://localhost:8080/',
+            scope: 'fosite',
+            state: 'some-random-state',
+            authEndpoint: 'http://localhost:8080/oauth2/authorization',
+            tokenEndpoint: 'http://localhost:8080/oauth2/token'
+        };
+
+        let authorizationCode = null;
+
+        // ページ読み込み時、URLからcodeを取得
+        window.addEventListener('load', function() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const code = urlParams.get('code');
+            const returnedState = urlParams.get('state');
+            
+            if (code) {
+                // stateの検証
+                if (returnedState !== CONFIG.state) {
+                    alert('State mismatch! CSRF攻撃の可能性があります');
+                    return;
+                }
+                
+                authorizationCode = code;
+                
+                document.getElementById('authCodeDisplay').innerHTML = `
+                    <div class="token">
+                        <strong>Authorization Code:</strong><br>
+                        ${code}<br><br>
+                        <strong>State:</strong> ${returnedState} ✓
+                    </div>
+                `;
+                
+                document.getElementById('exchangeBtn').disabled = false;
+                
+                // URLをクリーン
+                window.history.replaceState({}, document.title, "/");
+            }
+        });
+
+        function startAuthFlow() {
+            // 認可エンドポイントURL
+            const authUrl = new URL(CONFIG.authEndpoint);
+            authUrl.searchParams.set('client_id', CONFIG.clientId);
+            authUrl.searchParams.set('redirect_uri', CONFIG.redirectUri);
+            authUrl.searchParams.set('response_type', 'code');
+            authUrl.searchParams.set('scope', CONFIG.scope);
+            authUrl.searchParams.set('state', CONFIG.state);
+            
+            console.log('Authorization URL:', authUrl.toString());
+            
+            // 認可エンドポイントへリダイレクト
+            window.location.href = authUrl.toString();
+        }
+
+        async function exchangeToken() {
+            if (!authorizationCode) {
+                alert('認可コードがありません');
+                return;
+            }
+
+            try {
+                let headers = {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                };
+
+                let params = new URLSearchParams({
+                    grant_type: 'authorization_code',
+                    code: authorizationCode,
+                    redirect_uri: CONFIG.redirectUri,
+                });
+
+                    // Basic認証
+                    const credentials = btoa(`${CONFIG.clientId}:${CONFIG.clientSecret}`);
+                    headers['Authorization'] = `Basic ${credentials}`;
+                    
+                    console.log('Using Basic authentication');
+                    console.log('Authorization header:', headers['Authorization']);
+
+                console.log('Token request params:', params.toString());
+
+                const response = await fetch(CONFIG.tokenEndpoint, {
+                    method: 'POST',
+                    headers: headers,
+                    body: params
+                });
+
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    throw new Error(`Token request failed: ${response.status} - ${errorText}`);
+                }
+
+                const data = await response.json();
+                
+                document.getElementById('tokenDisplay').innerHTML = `
+                    <div class="token">
+                        <strong>認証方法:</strong> ${'Basic認証'}<br><br>
+                        <strong>Access Token:</strong><br>
+                        ${data.access_token}<br><br>
+                        <strong>Token Type:</strong> ${data.token_type}<br>
+                        <strong>Expires In:</strong> ${data.expires_in}秒<br>
+                        ${data.refresh_token ? `<strong>Refresh Token:</strong><br>${data.refresh_token}<br><br>` : ''}
+                        ${data.scope ? `<strong>Scope:</strong> ${data.scope}<br><br>` : ''}
+                        ${data.id_token ? `<strong>ID Token (Raw):</strong><br>${data.id_token}` : ''}
+                    </div>
+                `;
+
+                // ID Tokenをデコード
+                if (data.id_token) {
+                    decodeIdToken(data.id_token);
+                }
+
+            } catch (error) {
+                console.error('Token exchange error:', error);
+                document.getElementById('tokenDisplay').innerHTML = `
+                    <div style="color: red;">
+                        <strong>エラー:</strong> ${error.message}
+                    </div>
+                `;
+            }
+        }
+
+        function decodeIdToken(idToken) {
+            try {
+                // JWTをデコード（検証なし）
+                const parts = idToken.split('.');
+                const header = JSON.parse(atob(parts[0]));
+                const payload = JSON.parse(atob(parts[1]));
+                
+                document.getElementById('idTokenDisplay').innerHTML = `
+                    <h3>Header:</h3>
+                    <pre>${JSON.stringify(header, null, 2)}</pre>
+                    <h3>Payload:</h3>
+                    <pre>${JSON.stringify(payload, null, 2)}</pre>
+                `;
+            } catch (error) {
+                console.error('Failed to decode ID token:', error);
+                document.getElementById('idTokenDisplay').innerHTML = `
+                    <div style="color: red;">ID Tokenのデコードに失敗しました</div>
+                `;
+            }
+        }
+    </script>
+</body>
+</html>
