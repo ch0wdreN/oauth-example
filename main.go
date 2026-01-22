@@ -8,8 +8,10 @@ import (
 	"fmt"
 	"log"
 	"log/slog"
+	"maps"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"ch0wdreN/oauth-example/extension"
@@ -116,22 +118,31 @@ func (a *authorizer) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cookie := r.Header.Get("Cookie")
+	cookie := r.Header.Values("Cookie")
 
-	req := a.apiClient.FrontendAPI.ToSession(ctx).Cookie(cookie)
-	session, _, err := req.Execute()
+	req := a.apiClient.FrontendAPI.ToSession(ctx).Cookie(strings.Join(cookie, "; "))
+	session, res, err := req.Execute()
 	if err != nil {
-		slog.ErrorContext(ctx, "error occurred ToSession api call", slog.Any("error", err))
-		http.Redirect(w, r, "http://localhost:8080/error.html", http.StatusFound)
+		redirect := "http://localhost:8080/error.html"
+		if res.StatusCode == http.StatusUnauthorized {
+			current := fmt.Sprintf("http://%s%s", r.Host, r.RequestURI)
+			redirect = fmt.Sprintf("http://localhost:4433/self-service/login/browser?return_to=%s", url.QueryEscape(current))
+		}
+
+		http.Redirect(w, r, redirect, http.StatusFound)
+		return
+	}
+
+	if !*session.Active {
+		slog.InfoContext(ctx, "session is not active")
+		http.Redirect(w, r, "http://localhost:8080/", http.StatusFound)
 		return
 	}
 
 	extraAttributes := make(map[string]any)
 
-	if v, ok := session.Identity.Traits.(map[string]string); ok {
-		if email, exist := v["email"]; exist {
-			extraAttributes["email"] = email
-		}
+	if v, ok := session.Identity.Traits.(map[string]any); ok {
+		maps.Copy(extraAttributes, v)
 	}
 
 	ar, err := a.provider.NewAuthorizeRequest(ctx, r)
