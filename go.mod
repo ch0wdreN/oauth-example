@@ -4,8 +4,10 @@ go 1.25.2
 
 require (
 	github.com/caarlos0/env/v11 v11.3.1
+	github.com/go-chi/chi/v5 v5.2.4
 	github.com/goccy/go-json v0.10.5
 	github.com/ory/fosite v0.49.0
+	github.com/ory/kratos-client-go v1.3.8
 	github.com/ory/x v0.0.665
 	github.com/valkey-io/valkey-go v1.0.69
 )
@@ -52,7 +54,7 @@ require (
 	github.com/spf13/jwalterweatherman v1.1.0 // indirect
 	github.com/spf13/pflag v1.0.5 // indirect
 	github.com/spf13/viper v1.16.0 // indirect
-	github.com/stretchr/testify v1.9.0 // indirect
+	github.com/stretchr/testify v1.10.0 // indirect
 	github.com/subosito/gotenv v1.4.2 // indirect
 	go.opentelemetry.io/contrib/instrumentation/net/http/httptrace/otelhttptrace v0.46.1 // indirect
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.46.1 // indirect
