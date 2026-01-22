@@ -4,10 +4,12 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
+	"errors"
 	"fmt"
 	"log"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"time"
 
 	"ch0wdreN/oauth-example/extension"
@@ -100,6 +102,19 @@ type authorizer struct {
 
 func (a *authorizer) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+
+	_, err := r.Cookie("ory_kratos_session")
+	if errors.Is(err, http.ErrNoCookie) {
+		// not logined
+		current := fmt.Sprintf("http://%s%s", r.Host, r.RequestURI)
+		redirect := fmt.Sprintf("http://localhost:4433/self-service/login/browser?return_to=%s", url.QueryEscape(current))
+		http.Redirect(w, r, redirect, http.StatusFound)
+		return
+	}
+	if err != nil {
+		http.Redirect(w, r, "http://localhost:8080/error.html", http.StatusFound)
+		return
+	}
 
 	cookie := r.Header.Get("Cookie")
 
